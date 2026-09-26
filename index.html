@@ -58,7 +58,8 @@
   </div>
 
   <!-- Error / status banner -->
-  <div id="banner" class="mx-5 mb-2 hidden text-xs rounded-lg px-3 py-2" style="background:var(--surface2);color:var(--orange)"></div>
+  <div id="banner" class="mx-5 mb-1 hidden text-xs rounded-lg px-3 py-2" style="background:var(--surface2);color:var(--orange)"></div>
+  <p id="gpsAccuracy" class="mx-5 mb-2 text-xs shrink-0" style="color:var(--muted)"></p>
 
   <!-- Map -->
   <div class="mx-5 rounded-2xl overflow-hidden shrink-0" style="height:36vh;background:var(--surface)">
@@ -327,9 +328,17 @@ function updateStats(){
 /* ====== GEOLOCATION HANDLING ====== */
 function onPosition(pos){
   const { latitude:lat, longitude:lng, accuracy } = pos.coords;
-  // abaikan titik dengan akurasi buruk (>50m) agar jarak tidak melonjak salah
-  if(accuracy && accuracy > 50) return;
+  showAccuracy(accuracy);
+  // abaikan titik dengan akurasi sangat buruk (>100m) agar jarak tidak melonjak salah,
+  // tapi tetap ditampilkan angkanya supaya kamu tahu kenapa titik tidak nambah
+  if(accuracy && accuracy > 100) return;
   handleNewPoint(lat, lng);
+}
+function showAccuracy(acc){
+  const el = $('gpsAccuracy');
+  if(!el) return;
+  el.textContent = `Akurasi GPS: ±${Math.round(acc)} m`;
+  el.style.color = acc <= 30 ? 'var(--volt)' : acc <= 100 ? '#f5c453' : 'var(--orange)';
 }
 function handleNewPoint(lat, lng){
   const point = [lat, lng];
@@ -348,8 +357,35 @@ function handleNewPoint(lat, lng){
   updateStats();
 }
 function onGeoError(err){
-  showBanner('GPS tidak tersedia/ditolak. Menyalakan mode simulasi untuk desktop.');
-  startSimulation();
+  clearInterval(timerInterval); // hentikan sementara sambil user memutuskan
+  if(err && (err.code === 1 || err.code === 0)){
+    // 1 = PERMISSION_DENIED, 0 = geolocation tidak didukung browser -> tidak ada cara lain selain simulasi
+    showBanner('Izin lokasi ditolak. Menyalakan mode simulasi untuk desktop.');
+    timerInterval = setInterval(updateStats, 1000);
+    startSimulation();
+    return;
+  }
+  // 2 = POSITION_UNAVAILABLE, 3 = TIMEOUT -> ini sering cuma sinyal lemah/lambat
+  // (umum di laptop tanpa GPS asli), jadi jangan langsung paksa simulasi
+  showRetryBanner('Sinyal GPS lemah atau timeout. Cek Windows Location Service masih aktif, lalu coba lagi.');
+  timerInterval = setInterval(updateStats, 1000);
+}
+function showRetryBanner(msg){
+  banner.innerHTML = `${msg} <button id="btnRetryGps" class="underline font-semibold ml-1">Coba Lagi GPS</button> ·
+    <button id="btnUseSim" class="underline font-semibold ml-1">Pakai Simulasi</button>`;
+  banner.classList.remove('hidden');
+  banner.style.color = 'var(--orange)';
+  $('btnRetryGps').addEventListener('click', () => {
+    if(watchId !== null) navigator.geolocation.clearWatch(watchId);
+    watchId = navigator.geolocation.watchPosition(onPosition, onGeoError, {
+      enableHighAccuracy:true, maximumAge:5000, timeout:15000
+    });
+    banner.classList.add('hidden');
+  });
+  $('btnUseSim').addEventListener('click', () => {
+    banner.classList.add('hidden');
+    startSimulation();
+  });
 }
 
 /* ====== SIMULASI GPS (untuk testing di laptop tanpa GPS) ====== */
@@ -381,10 +417,10 @@ $('btnStart').addEventListener('click', () => {
 
   if('geolocation' in navigator){
     watchId = navigator.geolocation.watchPosition(onPosition, onGeoError, {
-      enableHighAccuracy:true, maximumAge:2000, timeout:8000
+      enableHighAccuracy:true, maximumAge:5000, timeout:15000
     });
   } else {
-    onGeoError();
+    onGeoError({code:0});
   }
   timerInterval = setInterval(updateStats, 1000);
 });
