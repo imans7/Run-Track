@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RunTrack</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#14161a; --surface:#1e2128; --surface2:#262a33;
+    --text:#f2f3f5; --muted:#8b909c; --volt:#d4ff3f; --orange:#ff5b3c;
+    padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overscroll-behavior:none;}
+  .display{font-family:'Space Grotesk',sans-serif;}
+  #map{filter:grayscale(35%) brightness(0.9) contrast(1.05);}
+  .leaflet-container{background:var(--bg)!important;}
+  .btn-shadow{box-shadow:0 6px 18px rgba(0,0,0,.35);}
+  .pulse-dot{animation:pulse 1.6s ease-in-out infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+</style>
+</head>
+<body class="flex flex-col h-full">
+
+  <!-- Header -->
+  <header class="px-5 pt-4 pb-2 flex items-center justify-between shrink-0">
+    <div class="flex items-center gap-2">
+      <span class="w-2.5 h-2.5 rounded-full" style="background:var(--volt)" id="statusDot"></span>
+      <h1 class="display text-lg font-bold tracking-tight">RunTrack</h1>
+    </div>
+    <div class="flex items-center gap-2 text-xs" style="color:var(--muted)">
+      <label for="weightInput">Berat</label>
+      <input id="weightInput" type="number" value="60" min="30" max="200"
+        class="w-14 rounded-md px-2 py-1 text-center text-xs" style="background:var(--surface2);color:var(--text)">
+      <span>kg</span>
+    </div>
+  </header>
+
+  <!-- Login / akun -->
+  <div class="px-5 pb-2 flex items-center justify-between text-xs shrink-0">
+    <button id="btnLogin" class="rounded-lg px-3 py-1.5 font-semibold" style="background:var(--surface2);color:var(--volt)">Masuk</button>
+    <span id="authStatus" style="color:var(--muted)">Mode tamu · riwayat tersimpan di perangkat ini</span>
+  </div>
+
+  <!-- Target jarak -->
+  <div class="px-5 pb-2 flex items-center gap-2 text-xs shrink-0" style="color:var(--muted)">
+    <label for="targetInput">Target</label>
+    <input id="targetInput" type="number" step="0.1" placeholder="cth. 5" min="0"
+      class="w-16 rounded-md px-2 py-1 text-center text-xs" style="background:var(--surface2);color:var(--text)">
+    <span>km</span>
+    <div class="flex-1 h-1.5 rounded-full overflow-hidden ml-2" style="background:var(--surface2)">
+      <div id="targetBar" class="h-full" style="width:0%;background:var(--volt)"></div>
+    </div>
+  </div>
+
+  <!-- Error / status banner -->
+  <div id="banner" class="mx-5 mb-2 hidden text-xs rounded-lg px-3 py-2" style="background:var(--surface2);color:var(--orange)"></div>
+
+  <!-- Map -->
+  <div class="mx-5 rounded-2xl overflow-hidden shrink-0" style="height:36vh;background:var(--surface)">
+    <div id="map" class="w-full h-full"></div>
+  </div>
+
+  <!-- Stats grid -->
+  <div class="grid grid-cols-2 gap-3 px-5 mt-4">
+    <div class="rounded-2xl p-4" style="background:var(--surface)">
+      <p class="text-xs" style="color:var(--muted)">Durasi</p>
+      <p id="statTime" class="display text-3xl font-bold mt-1">00:00</p>
+    </div>
+    <div class="rounded-2xl p-4" style="background:var(--surface)">
+      <p class="text-xs" style="color:var(--muted)">Jarak (km)</p>
+      <p id="statDist" class="display text-3xl font-bold mt-1" style="color:var(--volt)">0.00</p>
+    </div>
+    <div class="rounded-2xl p-4" style="background:var(--surface)">
+      <p class="text-xs" style="color:var(--muted)">Pace (min/km)</p>
+      <p id="statPace" class="display text-2xl font-bold mt-1">--:--</p>
+    </div>
+    <div class="rounded-2xl p-4" style="background:var(--surface)">
+      <p class="text-xs" style="color:var(--muted)">Kalori</p>
+      <p id="statCal" class="display text-2xl font-bold mt-1">0</p>
+    </div>
+  </div>
+
+  <div class="flex-1"></div>
+
+  <!-- Controls -->
+  <div class="px-5 pb-5 pt-3 flex gap-3 shrink-0">
+    <button id="btnStart" class="flex-1 rounded-2xl py-4 font-semibold display btn-shadow" style="background:var(--volt);color:#0e0f12">Start Run</button>
+    <button id="btnPause" class="flex-1 rounded-2xl py-4 font-semibold display btn-shadow hidden" style="background:var(--surface2);color:var(--text)">Pause</button>
+    <button id="btnFinish" class="flex-1 rounded-2xl py-4 font-semibold display btn-shadow hidden" style="background:var(--orange);color:#14161a">Finish</button>
+  </div>
+
+  <!-- Riwayat lari -->
+  <div class="px-5 pb-6 shrink-0">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="display text-sm font-bold" style="color:var(--muted)">Riwayat Lari</h2>
+      <button id="btnClearHistory" class="text-xs" style="color:var(--orange)">Hapus semua</button>
+    </div>
+    <div id="historyList" class="flex flex-col gap-2 max-h-56 overflow-y-auto"></div>
+  </div>
+
+<script>
+/* ====== STATE ====== */
+let watchId = null, timerInterval = null, simInterval = null;
+let startTimestamp = 0, pausedAccum = 0, pauseStart = 0;
+let isRunning = false, isPaused = false, simMode = false;
+let distanceKm = 0, lastPoint = null, path = [], pointTimes = [];
+let downloadsCap = null, userCap = null, dbCap = null, currentUid = null, runsCol = null, loggedIn = false;
+
+const $ = id => document.getElementById(id);
+const banner = $('banner');
+function showBanner(msg, isError=true){
+  banner.textContent = msg; banner.classList.remove('hidden');
+  banner.style.color = isError ? 'var(--orange)' : 'var(--volt)';
+}
+
+/* Siapkan kapabilitas "downloads" (untuk simpan file GPX) jika tersedia di viewer ini */
+(async () => {
+  try {
+    if (window.claude && typeof window.claude.use === 'function') {
+      downloadsCap = await window.claude.use('downloads');
+    }
+  } catch(e){ downloadsCap = null; }
+})();
+
+/* ====== LOGIN (identitas akun Claude yang membuka halaman ini) ======
+   Tidak ada server sendiri di sini, jadi "login" memakai identitas
+   viewer dari platform: setelah masuk, riwayat lari disimpan di
+   database privat milik akun tsb (data/users/<id>), bukan lagi hanya
+   di localStorage perangkat ini — jadi bisa tersinkron lintas perangkat
+   selama dibuka dari akun yang sama. */
+$('btnLogin').addEventListener('click', async () => {
+  if(loggedIn){
+    // logout: kembali ke mode tamu (localStorage)
+    loggedIn = false; runsCol = null; currentUid = null;
+    $('btnLogin').textContent = 'Masuk';
+    $('authStatus').textContent = 'Mode tamu · riwayat tersimpan di perangkat ini';
+    renderHistory();
+    return;
+  }
+  if(!(window.claude && typeof window.claude.use === 'function')){
+    showBanner('Login akun hanya tersedia saat dibuka lewat link artifact Claude. Di hosting sendiri, aplikasi tetap jalan penuh dalam mode tamu (riwayat lokal).', false);
+    return;
+  }
+  try{
+    userCap = await window.claude.use('user');
+    if(!userCap){ showBanner('Login tidak didukung di tampilan ini.'); return; }
+    currentUid = await userCap.id();
+    if(!currentUid){ showBanner('Tidak ada identitas akun untuk login di sini.'); return; }
+    const me = await userCap.me();
+    dbCap = await window.claude.use('db');
+    loggedIn = true;
+    $('authStatus').textContent = `Masuk sebagai ${me.name || 'Pelari'}`;
+    $('btnLogin').textContent = 'Keluar';
+    if(dbCap){
+      runsCol = dbCap.collection(`data/users/${currentUid}`);
+      showBanner('Riwayat kini tersinkron ke akunmu.', false);
+    } else {
+      showBanner('Masuk berhasil, tapi penyimpanan akun tidak tersedia — memakai penyimpanan lokal.');
+    }
+    renderHistory();
+  } catch(e){
+    showBanner('Gagal masuk, coba lagi.');
+  }
+});
+
+/* ====== RIWAYAT LARI (localStorage untuk tamu, db privat akun untuk yang login) ====== */
+const HISTORY_KEY = 'runtrack_history_v1';
+function loadLocalHistory(){
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) || []; }
+  catch(e){ return []; }
+}
+function saveLocalHistory(list){
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); } catch(e){}
+}
+async function renderHistory(){
+  const el = $('historyList');
+  let list = [];
+  if(loggedIn && runsCol){
+    try{
+      const snap = await runsCol.orderBy('timestamp','desc').limit(30).get();
+      list = snap.docs.map(d => d.data());
+    }catch(e){ list = []; }
+  } else {
+    list = loadLocalHistory().slice().reverse();
+  }
+  if(list.length === 0){
+    el.innerHTML = `<p class="text-xs" style="color:var(--muted)">Belum ada lari yang tersimpan.</p>`;
+    return;
+  }
+  el.innerHTML = list.map((run, i) => `
+    <div class="rounded-xl p-3 flex items-center justify-between" style="background:var(--surface)">
+      <div>
+        <p class="text-xs" style="color:var(--muted)">${run.date}</p>
+        <p class="display font-bold text-sm">${run.distanceKm.toFixed(2)} km · ${formatTime(run.durationMs)} · ${Math.round(run.calories)} kkal</p>
+      </div>
+      <button data-idx="${i}" class="btnExportGpx text-xs rounded-lg px-3 py-1.5 font-semibold" style="background:var(--surface2);color:var(--volt)">GPX</button>
+    </div>`).join('');
+  el.querySelectorAll('.btnExportGpx').forEach(btn => {
+    btn.addEventListener('click', () => exportGPX(list[+btn.dataset.idx]));
+  });
+}
+async function saveRunToHistory(run){
+  if(loggedIn && runsCol){
+    try{ await runsCol.add({ ...run, timestamp: Date.now() }); }
+    catch(e){ showBanner('Gagal menyimpan ke akun, disimpan lokal sebagai cadangan.'); saveLocalHistory([...loadLocalHistory(), run]); }
+  } else {
+    saveLocalHistory([...loadLocalHistory(), run]);
+  }
+  renderHistory();
+}
+$('btnClearHistory').addEventListener('click', async () => {
+  if(loggedIn && runsCol){
+    try{
+      const snap = await runsCol.get();
+      for(const d of snap.docs){ await runsCol.doc(d.id).delete(); }
+    }catch(e){}
+  } else {
+    saveLocalHistory([]);
+  }
+  renderHistory();
+});
+
+/* ====== EKSPOR GPX ======
+   Membentuk file GPX (format standar rute GPS berbasis XML) dari titik-titik
+   koordinat + waktu yang tercatat, lalu menawarkannya untuk diunduh. */
+function exportGPX(run){
+  const trkpts = run.points.map(p =>
+    `<trkpt lat="${p[0]}" lon="${p[1]}"><time>${p[2]}</time></trkpt>`
+  ).join('\n      ');
+  const gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="RunTrack" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>RunTrack ${run.date}</name>
+    <trkseg>
+      ${trkpts}
+    </trkseg>
+  </trk>
+</gpx>`;
+  const filename = `runtrack-${run.date.replace(/[/:\s]/g,'-')}.gpx`;
+  if(downloadsCap && downloadsCap.save){
+    downloadsCap.save({ filename, data: gpx }).catch(()=> fallbackDownload(gpx, filename));
+  } else {
+    fallbackDownload(gpx, filename);
+  }
+}
+function fallbackDownload(text, filename){
+  const blob = new Blob([text], {type:'application/gpx+xml'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ====== MAP SETUP (Leaflet) ====== */
+const map = L.map('map', {zoomControl:false, attributionControl:false}).setView([-6.2, 106.816], 15);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+const polyline = L.polyline([], {color:'#d4ff3f', weight:4}).addTo(map);
+let marker = null;
+
+/* ====== HAVERSINE FORMULA ======
+   Menghitung jarak antara 2 koordinat (lat/lng) di permukaan bumi.
+   R = radius bumi (km). Rumus ini memperhitungkan kelengkungan bumi,
+   jadi lebih akurat daripada jarak garis lurus biasa (Pythagoras). */
+function haversineKm(lat1, lon1, lat2, lon2){
+  const R = 6371; // radius bumi dalam km
+  const toRad = deg => deg * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c; // hasil dalam kilometer
+}
+
+/* ====== TIMER ====== */
+function formatTime(ms){
+  const totalSec = Math.floor(ms/1000);
+  const m = String(Math.floor(totalSec/60)).padStart(2,'0');
+  const s = String(totalSec%60).padStart(2,'0');
+  return `${m}:${s}`;
+}
+function elapsedMs(){
+  if(!isRunning) return 0;
+  const now = isPaused ? pauseStart : Date.now();
+  return now - startTimestamp - pausedAccum;
+}
+
+/* ====== STATS UPDATE (Pace & Kalori) ====== */
+function updateStats(){
+  const ms = elapsedMs();
+  $('statTime').textContent = formatTime(ms);
+  $('statDist').textContent = distanceKm.toFixed(2);
+
+  const minutes = ms / 60000;
+  // Pace = waktu (menit) dibagi jarak (km) -> menit per km
+  if(distanceKm > 0.02 && minutes > 0){
+    const paceMinKm = minutes / distanceKm;
+    const paceMin = Math.floor(paceMinKm);
+    const paceSec = Math.round((paceMinKm - paceMin) * 60);
+    $('statPace').textContent = `${paceMin}:${String(paceSec).padStart(2,'0')}`;
+  } else {
+    $('statPace').textContent = '--:--';
+  }
+
+  // Estimasi kalori: rumus sederhana ~1.036 kkal per kg berat badan per km
+  // (perkiraan umum energi berlari, mirip pendekatan yang dipakai app fitness dasar)
+  const weight = parseFloat($('weightInput').value) || 60;
+  const calories = distanceKm * weight * 1.036;
+  $('statCal').textContent = Math.round(calories);
+
+  // Progress ke target jarak (kalau diisi)
+  const target = parseFloat($('targetInput').value);
+  if(target > 0){
+    const pct = Math.min(100, (distanceKm / target) * 100);
+    $('targetBar').style.width = pct + '%';
+    if(pct >= 100) $('targetBar').style.background = '#4ade80';
+  } else {
+    $('targetBar').style.width = '0%';
+  }
+}
+
+/* ====== GEOLOCATION HANDLING ====== */
+function onPosition(pos){
+  const { latitude:lat, longitude:lng, accuracy } = pos.coords;
+  // abaikan titik dengan akurasi buruk (>50m) agar jarak tidak melonjak salah
+  if(accuracy && accuracy > 50) return;
+  handleNewPoint(lat, lng);
+}
+function handleNewPoint(lat, lng){
+  const point = [lat, lng];
+  if(lastPoint){
+    distanceKm += haversineKm(lastPoint[0], lastPoint[1], lat, lng);
+  }
+  lastPoint = point;
+  path.push(point);
+  pointTimes.push(new Date().toISOString());
+  polyline.setLatLngs(path);
+  if(!marker){ marker = L.circleMarker(point,{radius:7,color:'#d4ff3f',fillColor:'#d4ff3f',fillOpacity:1}).addTo(map); }
+  else marker.setLatLng(point);
+  // Ikuti posisi secara real-time: zoom dekat di titik pertama, lalu animasi halus tiap update
+  if(path.length === 1){ map.setView(point, 17); }
+  else { map.panTo(point, {animate:true, duration:0.5}); }
+  updateStats();
+}
+function onGeoError(err){
+  showBanner('GPS tidak tersedia/ditolak. Menyalakan mode simulasi untuk desktop.');
+  startSimulation();
+}
+
+/* ====== SIMULASI GPS (untuk testing di laptop tanpa GPS) ====== */
+function startSimulation(){
+  simMode = true;
+  let base = [-6.2, 106.816];
+  lastPoint = lastPoint || base;
+  simInterval = setInterval(()=>{
+    if(isPaused) return;
+    // gerakan acak kecil ~ meniru kecepatan lari santai (~10 km/jam)
+    const dLat = (Math.random()-0.3) * 0.00025;
+    const dLng = (Math.random()-0.3) * 0.00025;
+    const next = [lastPoint[0] + dLat, lastPoint[1] + dLng];
+    handleNewPoint(next[0], next[1]);
+  }, 1000);
+}
+
+/* ====== CONTROL BUTTONS ====== */
+$('btnStart').addEventListener('click', () => {
+  isRunning = true; isPaused = false;
+  startTimestamp = Date.now(); pausedAccum = 0;
+  distanceKm = 0; lastPoint = null; path = []; pointTimes = [];
+  polyline.setLatLngs([]);
+  $('targetBar').style.background = 'var(--volt)';
+  $('btnStart').classList.add('hidden');
+  $('btnPause').classList.remove('hidden');
+  $('btnFinish').classList.remove('hidden');
+  banner.classList.add('hidden');
+
+  if('geolocation' in navigator){
+    watchId = navigator.geolocation.watchPosition(onPosition, onGeoError, {
+      enableHighAccuracy:true, maximumAge:2000, timeout:8000
+    });
+  } else {
+    onGeoError();
+  }
+  timerInterval = setInterval(updateStats, 1000);
+});
+
+$('btnPause').addEventListener('click', () => {
+  if(!isPaused){
+    isPaused = true; pauseStart = Date.now();
+    $('btnPause').textContent = 'Resume';
+    $('statusDot').classList.remove('pulse-dot');
+  } else {
+    isPaused = false; pausedAccum += Date.now() - pauseStart;
+    $('btnPause').textContent = 'Pause';
+    $('statusDot').classList.add('pulse-dot');
+  }
+});
+
+$('btnFinish').addEventListener('click', () => {
+  isRunning = false;
+  clearInterval(timerInterval);
+  if(watchId !== null) navigator.geolocation.clearWatch(watchId);
+  if(simInterval) clearInterval(simInterval);
+  const summary = `Selesai! Jarak ${distanceKm.toFixed(2)} km, waktu ${$('statTime').textContent}, kalori ${$('statCal').textContent} kkal.`;
+  showBanner(summary, false);
+  $('btnStart').classList.remove('hidden');
+  $('btnPause').classList.add('hidden'); $('btnPause').textContent = 'Pause';
+  $('btnFinish').classList.add('hidden');
+
+  // Simpan lari ke riwayat hanya jika ada jarak yang tercatat
+  if(distanceKm > 0.01){
+    saveRunToHistory({
+      date: new Date().toLocaleString('id-ID'),
+      distanceKm,
+      durationMs: elapsedMs(),
+      calories: distanceKm * (parseFloat($('weightInput').value) || 60) * 1.036,
+      points: path.map((p, i) => [p[0], p[1], pointTimes[i]])
+    });
+  }
+});
+
+renderHistory(); // tampilkan riwayat (lokal/tamu) saat halaman dibuka
+</script>
+</body>
+</html>
